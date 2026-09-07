@@ -147,7 +147,23 @@ function GameCanvas({ selectedCharacter, selectedDrill, paused, soundOn, onStats
     const drill = (drills.find((item) => item.id === selectedDrill) ?? drills[0])!;
     const char = (characters.find((item) => item.id === selectedCharacter) ?? characters[0])!;
     const stats: GameStats = { score: 0, stars: 0, gems: 0, depth: 0, combo: 1, time: 60 };
-    let collectionStep = 0;
+    type Pickup = { id: number; x: number; worldDepth: number; kind: "star" | "gem" };
+    const pickups: Pickup[] = [];
+    let pickupSeq = 0;
+    let spawnCursor = 6;
+    let spawnCount = 0;
+    const spawnPickups = (aheadTo: number, edgeAmount: number) => {
+      while (spawnCursor < aheadTo) {
+        spawnCount += 1;
+        pickups.push({
+          id: pickupSeq++,
+          x: edgeAmount + Math.random() * (1 - edgeAmount * 2),
+          worldDepth: spawnCursor,
+          kind: spawnCount % 4 === 0 ? "gem" : "star",
+        });
+        spawnCursor += 7 + Math.random() * 4;
+      }
+    };
     let alarmed = false;
 
     const resize = () => {
@@ -210,15 +226,26 @@ function GameCanvas({ selectedCharacter, selectedDrill, paused, soundOn, onStats
         player.angle += (targetAngle - player.angle) * Math.min(1, dt * 7);
         setDrillIntensity(Math.min(1, Math.abs(player.vy) / 9 + Math.abs(player.vx) * 1.6));
         rivals.forEach((rival, index) => { rival.depth += dt * rival.speed * (index ? .95 : 1.05) + Math.sin(now / 900 + index) * dt; rival.x += Math.sin(now / 1400 + index * 3) * dt * .015; rival.x = Math.max(edge, Math.min(1 - edge, rival.x)); });
-        const step = Math.floor(player.depth / 7);
-        if (step > collectionStep) {
-          collectionStep = step;
-          const gem = step % 4 === 0;
-          stats.stars += gem ? 0 : 1;
-          stats.gems += gem ? 1 : 0;
-          stats.combo = Math.min(8, stats.combo + 1);
-          stats.score += gem ? 100 : 10 * stats.combo;
-          if (gem) sfx.gem(); else sfx.star();
+        spawnPickups(player.depth + 60, edge);
+        for (let i = pickups.length - 1; i >= 0; i--) {
+          const pickup = pickups[i]!;
+          const depthDelta = pickup.worldDepth - player.depth;
+          if (depthDelta < -6) {
+            // scrolled past uncollected — chain broken
+            pickups.splice(i, 1);
+            stats.combo = 1;
+            continue;
+          }
+          const xDelta = Math.abs(pickup.x - player.x);
+          if (Math.abs(depthDelta) < 3.5 && xDelta < 0.055) {
+            pickups.splice(i, 1);
+            const gem = pickup.kind === "gem";
+            stats.stars += gem ? 0 : 1;
+            stats.gems += gem ? 1 : 0;
+            stats.combo = Math.min(8, stats.combo + 1);
+            stats.score += gem ? 100 : 10 * stats.combo;
+            if (gem) sfx.gem(); else sfx.star();
+          }
         }
         stats.depth = Math.floor(player.depth);
         if (stats.time <= 10 && !alarmed) { alarmed = true; sfx.alarm(); }
@@ -244,8 +271,6 @@ function GameCanvas({ selectedCharacter, selectedDrill, paused, soundOn, onStats
           const x = col * tile; const y = row * tile - offset;
           ctx.fillStyle = hash % 3 ? "rgba(255,255,255,.035)" : "rgba(0,0,0,.11)";
           ctx.strokeStyle = "rgba(255,255,255,.055)"; ctx.lineWidth = 1; rounded(x + 2, y + 2, tile - 4, tile - 4, 10); ctx.strokeRect(x + 3, y + 3, tile - 6, tile - 6);
-          if (hash === 3 || hash === -3) drawCrystal(x + 28, y + 28, zone === "volcanic" ? "#ff6b24" : "#35ddff", 10);
-          if (hash === 7 || hash === -7) { ctx.fillStyle = "#ffd12a"; ctx.font = "24px serif"; ctx.fillText("★", x + 18, y + 39); }
           if (zone === "volcanic" && hash === 11) { ctx.fillStyle = "#ff3d16"; rounded(x + 5, y + 39, tile - 10, 12, 6); }
         }
       }
@@ -254,6 +279,21 @@ function GameCanvas({ selectedCharacter, selectedDrill, paused, soundOn, onStats
         ctx.fillStyle = i % 3 ? "rgba(255,198,70,.35)" : "rgba(64,218,255,.32)"; ctx.fillRect(px, py, 3, 3);
       }
       const playerY = h * .54;
+      pickups.forEach((pickup) => {
+        const py = playerY + (pickup.worldDepth - player.depth) * 5;
+        if (py < -40 || py > h + 40) return;
+        const px = pickup.x * w;
+        const bob = Math.sin(now / 260 + pickup.id) * 4;
+        if (pickup.kind === "gem") {
+          drawCrystal(px, py + bob, zone === "volcanic" ? "#ff6b24" : "#35ddff", 13);
+        } else {
+          ctx.save();
+          ctx.shadowColor = "#ffd12a"; ctx.shadowBlur = 10;
+          ctx.fillStyle = "#ffd12a"; ctx.font = "26px serif"; ctx.textAlign = "center";
+          ctx.fillText("★", px, py + bob + 8);
+          ctx.restore();
+        }
+      });
       rivals.forEach((rival, index) => drawDrill(rival.x * w, playerY + (rival.depth - player.depth) * 5 + (index ? 150 : -130), rival.color, rival.name));
       drawDrill(player.x * w, playerY, selectedDrill === "speed" ? "#ff5578" : selectedDrill === "power" ? "#31bff1" : "#f0a712", `YOU · ${char.name}`, true, player.angle);
       if (stats.time <= 10) {
