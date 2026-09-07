@@ -21,6 +21,7 @@ import {
 import menuArt from "@/assets/drill-war-menu.jpg";
 import { Button } from "@/components/ui/button";
 import { setDrillIntensity, setSoundEnabled, sfx, startDrillLoop, stopDrillLoop, unlockAudio } from "@/lib/arcade-audio";
+import { loadLeaderboard, saveScore, type LeaderboardEntry } from "@/lib/leaderboard";
 
 type Screen = "menu" | "howto" | "settings" | "character" | "drill" | "countdown" | "game" | "results";
 type CharacterId = "alex" | "mia" | "robo";
@@ -323,6 +324,8 @@ export function DrillWarGame() {
   const [paused, setPaused] = useState(false);
   const [sound, setSound] = useState(true);
   const [stats, setStats] = useState<GameStats>({ score: 0, stars: 0, gems: 0, depth: 0, combo: 1, time: 60 });
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => loadLeaderboard());
+  const [lastEntryId, setLastEntryId] = useState<string | null>(null);
 
   useEffect(() => { setSoundEnabled(sound); }, [sound]);
 
@@ -341,7 +344,22 @@ export function DrillWarGame() {
 
   useEffect(() => { if (screen === "results") sfx.win(); }, [screen]);
 
-  const finishGame = useCallback((finalStats: GameStats) => { setStats(finalStats); setScreen("results"); setPaused(false); }, []);
+  const finishGame = useCallback((finalStats: GameStats) => {
+    setStats(finalStats);
+    const { entries, saved } = saveScore({
+      score: finalStats.score,
+      character,
+      drill,
+      stars: finalStats.stars,
+      gems: finalStats.gems,
+      depth: finalStats.depth,
+      date: new Date().toISOString(),
+    });
+    setLeaderboard(entries);
+    setLastEntryId(saved.id);
+    setScreen("results");
+    setPaused(false);
+  }, [character, drill]);
   const updateStats = useCallback((next: GameStats) => setStats(next), []);
   const go = useCallback((next: Screen, sound: () => void = sfx.click) => { unlockAudio(); sound(); setScreen(next); }, []);
   const begin = () => go("character", sfx.select);
@@ -392,7 +410,18 @@ export function DrillWarGame() {
 
       {screen === "countdown" && <section className="countdown-stage"><p>GET READY!</p><strong key={countdown}>{countdown}</strong><span>{characters.find((c) => c.id === character)?.name} · {drills.find((d) => d.id === drill)?.name}</span></section>}
 
-      {screen === "results" && <section className="panel-screen results-screen"><Brand compact /><div className="winner-title"><Trophy /><div><small>EXPEDITION COMPLETE</small><h1>YOU WIN!</h1></div></div><div className="result-score"><span>{characters.find((c) => c.id === character)?.icon}</span><div><small>FINAL SCORE</small><strong>{stats.score.toLocaleString()}</strong></div></div><div className="result-stats"><div><Star /><strong>{stats.stars}</strong><small>Stars</small></div><div><Gem /><strong>{stats.gems}</strong><small>Gems</small></div><div><ArrowDown /><strong>{stats.depth}m</strong><small>Depth</small></div><div><Zap /><strong>x{stats.combo}</strong><small>Best combo</small></div></div><div className="final-board"><h3>FINAL LEADERBOARD</h3><div className="winner-row"><b>1</b><span>YOU · {character.toUpperCase()}</span><strong>{stats.score.toLocaleString()}</strong></div><div><b>2</b><span>MIA</span><strong>{Math.floor(stats.depth * 8.1 + 170)}</strong></div><div><b>3</b><span>ROBO</span><strong>{Math.floor(stats.depth * 6.9 + 130)}</strong></div></div><div className="selection-actions"><Button variant="arcade" size="xl" onClick={() => go("countdown")}><RotateCcw /> Race again</Button><Button variant="metal" size="lg" onClick={() => go("drill")}><Settings /> Change drill</Button></div></section>}
+      {screen === "results" && <section className="panel-screen results-screen"><Brand compact /><div className="winner-title"><Trophy /><div><small>EXPEDITION COMPLETE</small><h1>YOU WIN!</h1></div></div><div className="result-score"><span>{characters.find((c) => c.id === character)?.icon}</span><div><small>FINAL SCORE</small><strong>{stats.score.toLocaleString()}</strong></div></div><div className="result-stats"><div><Star /><strong>{stats.stars}</strong><small>Stars</small></div><div><Gem /><strong>{stats.gems}</strong><small>Gems</small></div><div><ArrowDown /><strong>{stats.depth}m</strong><small>Depth</small></div><div><Zap /><strong>x{stats.combo}</strong><small>Best combo</small></div></div>{(() => {
+                const myRank = leaderboard.findIndex((entry) => entry.id === lastEntryId);
+                const top = leaderboard.slice(0, 5);
+                const madeTop = myRank > -1 && myRank < 5;
+                return (
+                  <div className="final-board">
+                    <h3>LEADERBOARD · TOP {top.length}</h3>
+                    {top.map((entry, index) => <div key={entry.id} className={entry.id === lastEntryId ? "winner-row" : ""}><b>{index + 1}</b><span>{entry.character.toUpperCase()}{entry.id === lastEntryId ? " · YOU" : ""}</span><strong>{entry.score.toLocaleString()}</strong></div>)}
+                    {!madeTop && myRank > -1 && <div className="winner-row"><b>{myRank + 1}</b><span>{character.toUpperCase()} · YOU</span><strong>{stats.score.toLocaleString()}</strong></div>}
+                  </div>
+                );
+              })()}<div className="selection-actions"><Button variant="arcade" size="xl" onClick={() => go("countdown")}><RotateCcw /> Race again</Button><Button variant="metal" size="lg" onClick={() => go("drill")}><Settings /> Change drill</Button></div></section>}
     </main>
   );
 }
